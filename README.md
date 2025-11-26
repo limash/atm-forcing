@@ -1,11 +1,11 @@
 # NORA3 data fetching and processing for ocean models.
 
 ## Installation
-Python:
 1. Install conda <https://conda-forge.org/download/>.
 2. Create a conda environment `conda create --name nora3 python=3.12`
 3. Activate the envoronment `conda activate nora3`
-4. Navigate to the oslofjord directory
+4. `git clone https://github.com/limash/atm-forcing.git`
+4. Navigate to the atm-forcing directory you git cloned
 5. Install the dependencies `pip install -e .`
 6. Xesmf is required, see <https://xesmf.readthedocs.io/en/stable/installation.html>;
    install with `conda install -c conda-forge xesmf`.
