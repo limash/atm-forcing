@@ -1,5 +1,7 @@
 from datetime import datetime
 
+import numpy as np
+import pandas as pd
 import xarray as xr
 import xesmf as xe
 
@@ -98,3 +100,17 @@ def generate_catalog_urls(start_year=2010, end_year=2020):
                         datetime(year, month, day, hour),
                         f"https://thredds.met.no/thredds/catalog/nora3/{year}/{month:02d}/{day:02d}/{hour:02d}/catalog.xml",
                     )
+
+
+def reshape_to_full_year(ds, start="2020-01-01 00:00:00", end="2021-01-01 00:00:00", dim="time"):
+    start = pd.Timestamp(start)
+    end = pd.Timestamp(end)
+    tmin = pd.to_datetime(ds[dim].min().data)
+    dt = pd.to_datetime(ds[dim][1].data) - pd.to_datetime(ds[dim][0].data)
+    n_before = int((tmin - start) / dt)
+    new_coord = start + dt * np.arange(n_before)
+    first = ds.isel(time=0)
+    pad = xr.concat([first] * n_before, dim=dim)
+    pad = pad.assign_coords({dim: new_coord})
+    ds = xr.concat([pad, ds], dim=dim)
+    return ds.sel(time=slice(None, end))
