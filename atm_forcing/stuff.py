@@ -23,10 +23,55 @@ CF_ROMS = (
 )
 
 
+def lonlat_to_angle(lon, lat):
+    # this returns angle from east to the current x
+    diff_lon = np.diff(lon, axis=1)
+    diff_lon = np.hstack([diff_lon, diff_lon[:, -1:]])
+    diff_lat = np.diff(lat, axis=1)
+    diff_lat = np.hstack([diff_lat, diff_lat[:, -1:]])
+    assert np.all(np.abs(diff_lon) < 180)
+    diff_lon *= np.cos(np.deg2rad(lat))
+    return np.arctan2(diff_lat, diff_lon)
+
+
+def rotate_u_v(angle, u_east, v_north):
+    # rotate in the direction of angle
+    cos_alpha = np.cos(angle)
+    sin_alpha = np.sin(angle)
+    u_x = u_east * cos_alpha + v_north * sin_alpha
+    v_y = v_north * cos_alpha - u_east * sin_alpha
+    return u_x, v_y
+
+
+def get_u_v_from_coords(ds):
+    angle = lonlat_to_angle(ds.longitude.values, ds.latitude.values)
+    # rotate in the opposite direction
+    u, v = rotate_u_v(-angle, ds.x_wind_10m, ds.y_wind_10m)
+    return u, v
+
+
+def wind_direction_transform(da):
+    # blows from to blows to
+    da += 180
+    da = xr.where(da >= 360, da - 360, da)
+    # clockwise to unticlockwise
+    da = -1 * da + 360
+    # rotate so east is pos x and north is pos y
+    da += 90
+    da = xr.where(da >= 360, da - 360, da)
+    return (np.pi / 180) * da
+
+
+def get_u_v_from_direction(ds):
+    da_wd = wind_direction_transform(ds.wind_direction.copy(deep=True))
+    u = ds.wind_speed * np.cos(da_wd)
+    v = ds.wind_speed * np.sin(da_wd)
+    return u, v
+
+
 def regrid(regridder, da, lat, lon):
     if regridder is None:
         target_grid = xr.Dataset({"lat": (["lat"], lat), "lon": (["lon"], lon)})
-
         source_grid = xr.Dataset(
             {
                 "lat": (("y", "x"), da.latitude.data),
@@ -37,12 +82,22 @@ def regrid(regridder, da, lat, lon):
     return regridder, regridder(da)
 
 
-def get_ds(regridder, ds, lat, lon):
-    da_x_wind_10m = ds["x_wind_10m"].isel(height4=0)
+def get_winds(regridder, ds, lat, lon):
+    u, v = get_u_v_from_coords(ds)
+    da_u = xr.DataArray(data=u, coords=ds.x_wind_10m.coords, dims=ds.x_wind_10m.dims, name="u")
+    da_v = xr.DataArray(data=v, coords=ds.x_wind_10m.coords, dims=ds.x_wind_10m.dims, name="v")
+
+    da_x_wind_10m = da_u.isel(height4=0)
     regridder, da_x_wind_10m = regrid(regridder, da_x_wind_10m, lat, lon)
 
-    da_y_wind_10m = ds["y_wind_10m"].isel(height4=0)
+    da_y_wind_10m = da_v.isel(height4=0)
     regridder, da_y_wind_10m = regrid(regridder, da_y_wind_10m, lat, lon)
+
+    return regridder, da_x_wind_10m, da_y_wind_10m
+
+
+def get_ds(regridder, ds, lat, lon):
+    regridder, da_x_wind_10m, da_y_wind_10m = get_winds(regridder, ds, lat, lon)
 
     da_swrad_acc = ds["integral_of_surface_net_downward_shortwave_flux_wrt_time"].isel(height0=0)
     regridder, da_swrad_acc = regrid(regridder, da_swrad_acc, lat, lon)
