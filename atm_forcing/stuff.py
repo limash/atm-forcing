@@ -82,22 +82,71 @@ def regrid(regridder, da, lat, lon):
     return regridder, regridder(da)
 
 
-def get_winds(regridder, ds, lat, lon):
+def regrid_curvilinear(regridder, da, target_lat, target_lon):
+    """
+    Regrid a DataArray onto a curvilinear target grid.
+
+    Parameters
+    ----------
+    regridder : xe.Regridder or None
+        Existing regridder (for reuse), or None to create a new one.
+    da : xarray.DataArray
+        Source data with curvilinear coordinates.
+        Must have 2D latitude/longitude coordinates.
+    target_lon : xarray.DataArray
+        2D longitude of target grid (e.g., lon_rho).
+    target_lat : xarray.DataArray
+        2D latitude of target grid (e.g., lat_rho).
+
+    Returns
+    -------
+    regridder : xe.Regridder
+    da_out : xarray.DataArray
+        Regridded data.
+    """
+
+    if regridder is None:
+        # --- Source grid (from data) ---
+        source_grid = xr.Dataset(
+            {
+                "lon": (da.longitude.dims, da.longitude.data),
+                "lat": (da.latitude.dims, da.latitude.data),
+            }
+        )
+
+        # --- Target grid (curvilinear) ---
+        target_grid = xr.Dataset(
+            {
+                "lon": (target_lon.dims, target_lon.data),
+                "lat": (target_lat.dims, target_lat.data),
+            }
+        )
+
+        regridder = xe.Regridder(
+            source_grid,
+            target_grid,
+            method="bilinear",
+            unmapped_to_nan=True,
+            reuse_weights=False,
+        )
+
+    da_out = regridder(da)
+    return regridder, da_out
+
+
+def get_winds(ds):
     u, v = get_u_v_from_coords(ds)
     da_u = xr.DataArray(data=u, coords=ds.x_wind_10m.coords, dims=ds.x_wind_10m.dims, name="u")
     da_v = xr.DataArray(data=v, coords=ds.x_wind_10m.coords, dims=ds.x_wind_10m.dims, name="v")
-
-    da_x_wind_10m = da_u.isel(height4=0)
-    regridder, da_x_wind_10m = regrid(regridder, da_x_wind_10m, lat, lon)
-
-    da_y_wind_10m = da_v.isel(height4=0)
-    regridder, da_y_wind_10m = regrid(regridder, da_y_wind_10m, lat, lon)
-
-    return regridder, da_x_wind_10m, da_y_wind_10m
+    da_u_wind_10m = da_u.isel(height4=0)
+    da_v_wind_10m = da_v.isel(height4=0)
+    return da_u_wind_10m, da_v_wind_10m
 
 
 def get_ds(regridder, ds, lat, lon):
-    regridder, da_x_wind_10m, da_y_wind_10m = get_winds(regridder, ds, lat, lon)
+    da_u_wind_10m, da_v_wind_10m = get_winds(ds)
+    regridder, da_u_wind_10m = regrid(regridder, da_u_wind_10m, lat, lon)
+    regridder, da_v_wind_10m = regrid(regridder, da_v_wind_10m, lat, lon)
 
     da_swrad_acc = ds["integral_of_surface_net_downward_shortwave_flux_wrt_time"].isel(height0=0)
     regridder, da_swrad_acc = regrid(regridder, da_swrad_acc, lat, lon)
@@ -126,8 +175,8 @@ def get_ds(regridder, ds, lat, lon):
 
     ds_out = xr.Dataset(
         {
-            "x_wind_10m": da_x_wind_10m,
-            "y_wind_10m": da_y_wind_10m,
+            "u_wind_10m": da_u_wind_10m,
+            "v_wind_10m": da_v_wind_10m,
             "swrad": da_swrad,
             "specific_humidity_2m": da_specific_humidity,
             "air_temperature_2m": da_air_temperature,
@@ -135,6 +184,48 @@ def get_ds(regridder, ds, lat, lon):
             "air_pressure_at_sea_level": da_air_pressure,
             "lwrad": da_lwrad,
             # "cloud_area_fraction": da_cloud_area_fraction,
+        }
+    )
+    time_aligned = da_swrad.time
+    return regridder, ds_out.reindex(time=time_aligned).reset_coords(drop=True)
+
+
+def get_ds_roms(regridder, ds, lat, lon):
+    da_u_wind_10m, da_v_wind_10m = get_winds(ds)
+    regridder, da_u_wind_10m = regrid_curvilinear(regridder, da_u_wind_10m, lat, lon)
+    regridder, da_v_wind_10m = regrid_curvilinear(regridder, da_v_wind_10m, lat, lon)
+
+    da_swrad_acc = ds["integral_of_surface_net_downward_shortwave_flux_wrt_time"].isel(height0=0)
+    regridder, da_swrad_acc = regrid_curvilinear(regridder, da_swrad_acc, lat, lon)
+    da_swrad = da_swrad_acc.diff(dim="time") / (60 * 60)
+
+    da_specific_humidity = ds["specific_humidity_2m"].isel(height1=0)
+    regridder, da_specific_humidity = regrid_curvilinear(regridder, da_specific_humidity, lat, lon)
+
+    da_air_temperature = ds["air_temperature_2m"].isel(height1=0)
+    regridder, da_air_temperature = regrid_curvilinear(regridder, da_air_temperature, lat, lon)
+    da_air_temperature -= 273.15
+
+    da_precipitation_acc = ds["precipitation_amount_acc"].isel(height0=0)
+    regridder, da_precipitation_acc = regrid_curvilinear(regridder, da_precipitation_acc, lat, lon)
+    da_precipitation = da_precipitation_acc.diff(dim="time") / (60 * 60)
+
+    da_air_pressure = ds["air_pressure_at_sea_level"].isel(height_above_msl=0)
+    regridder, da_air_pressure = regrid_curvilinear(regridder, da_air_pressure, lat, lon)
+    da_lwrad_acc = ds["integral_of_surface_downwelling_longwave_flux_in_air_wrt_time"].isel(height0=0)
+    regridder, da_lwrad_acc = regrid_curvilinear(regridder, da_lwrad_acc, lat, lon)
+    da_lwrad = da_lwrad_acc.diff(dim="time") / (60 * 60)
+
+    ds_out = xr.Dataset(
+        {
+            "u_wind_10m": da_u_wind_10m,
+            "v_wind_10m": da_v_wind_10m,
+            "swrad": da_swrad,
+            "specific_humidity_2m": da_specific_humidity,
+            "air_temperature_2m": da_air_temperature,
+            "precipitation": da_precipitation,
+            "air_pressure_at_sea_level": da_air_pressure,
+            "lwrad": da_lwrad,
         }
     )
     time_aligned = da_swrad.time
