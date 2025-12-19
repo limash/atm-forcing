@@ -190,10 +190,13 @@ def get_ds(regridder, ds, lat, lon):
     return regridder, ds_out.reindex(time=time_aligned).reset_coords(drop=True)
 
 
-def get_ds_roms(regridder, ds, lat, lon):
+def get_ds_roms(regridder, ds, ds_grid):
+    lat, lon = ds_grid.lat_rho, ds_grid.lon_rho
     da_u_wind_10m, da_v_wind_10m = get_winds(ds)
     regridder, da_u_wind_10m = regrid_curvilinear(regridder, da_u_wind_10m, lat, lon)
     regridder, da_v_wind_10m = regrid_curvilinear(regridder, da_v_wind_10m, lat, lon)
+    # assuming that angle is from east to x (but it is called 'is between x and east')
+    da_x_wind_10m, da_y_wind_10m = rotate_u_v(ds_grid.angle.values, da_u_wind_10m, da_v_wind_10m)
 
     da_swrad_acc = ds["integral_of_surface_net_downward_shortwave_flux_wrt_time"].isel(height0=0)
     regridder, da_swrad_acc = regrid_curvilinear(regridder, da_swrad_acc, lat, lon)
@@ -220,6 +223,8 @@ def get_ds_roms(regridder, ds, lat, lon):
         {
             "u_wind_10m": da_u_wind_10m,
             "v_wind_10m": da_v_wind_10m,
+            "x_wind_10m": da_x_wind_10m,
+            "y_wind_10m": da_y_wind_10m,
             "swrad": da_swrad,
             "specific_humidity_2m": da_specific_humidity,
             "air_temperature_2m": da_air_temperature,

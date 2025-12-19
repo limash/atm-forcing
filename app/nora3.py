@@ -10,15 +10,17 @@ import numpy as np
 import xarray as xr
 from siphon.catalog import TDSCatalog
 
-from atm_forcing import CF_ROMS, generate_catalog_urls, get_ds
+from atm_forcing import CF_ROMS, generate_catalog_urls, get_ds, get_ds_roms  # noqa: F401
 
 LAT_NEW = np.arange(58.9, 60, 0.02)
 LON_NEW = np.arange(10.1, 11.1, 0.02)
+FILE_PATH_GRID = Path.home() / "dump_fram_nn9297k" / "ROHO800_grid_fix5.nc"
 
 
 def process_nora3(output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
     parameters = [x[0] for x in CF_ROMS]
+    ds_grid = xr.open_dataset(FILE_PATH_GRID)
 
     regridder = None
     dss = []
@@ -42,7 +44,8 @@ def process_nora3(output_dir: Path):
         )
         ds = ds[parameters]
 
-        regridder, ds = get_ds(regridder, ds, LAT_NEW, LON_NEW)
+        # regridder, ds = get_ds(regridder, ds, LAT_NEW, LON_NEW)
+        regridder, ds = get_ds_roms(regridder, ds, ds_grid)
 
         dss.append(ds)
         timestamps.append(timestamp)
@@ -50,10 +53,13 @@ def process_nora3(output_dir: Path):
         # There should be 4 files per day
         if len(dss) > 3:
             assert len(set(timestamps)) <= 1
-            ds_out = xr.combine_by_coords(dss, coords=["time"], join="outer")
+            ds_out = xr.combine_by_coords(
+                dss, coords=["time"], join="outer", combine_attrs="override", compat="no_conflicts"
+            )
+            ds_out = ds_out.sel(time=~ds_out.get_index("time").duplicated())
 
             print(f"Downloading, processing, saving {file_path}")
-            ds_out.to_netcdf(file_path)
+            ds_out.to_netcdf(file_path, encoding={var: {"zlib": True, "complevel": 5} for var in ds.data_vars})
 
             dss = []
             timestamps = []
