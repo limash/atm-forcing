@@ -17,16 +17,16 @@ LON_NEW = np.arange(10.1, 11.1, 0.02)
 FILE_PATH_GRID = Path.home() / "dump_fram_nn9297k" / "ROHO800_grid_fix5.nc"
 
 
-def process_nora3(output_dir: Path):
+def process_nora3(output_dir: Path, use_roms: bool = False, start_year: int = None, end_year: int = None):
     output_dir.mkdir(parents=True, exist_ok=True)
     parameters = [x[0] for x in CF_ROMS]
-    ds_grid = xr.open_dataset(FILE_PATH_GRID)
+    ds_grid = xr.open_dataset(FILE_PATH_GRID) if use_roms else None
 
     regridder = None
     dss = []
     timestamps = []
 
-    for date_and_time, catalog_url in generate_catalog_urls():
+    for date_and_time, catalog_url in generate_catalog_urls(start_year, end_year):
         timestamp = date_and_time.strftime("%Y%m%d")
         file_path = output_dir / f"{timestamp}.nc"
 
@@ -44,8 +44,10 @@ def process_nora3(output_dir: Path):
         )
         ds = ds[parameters]
 
-        # regridder, ds = get_ds(regridder, ds, LAT_NEW, LON_NEW)
-        regridder, ds = get_ds_roms(regridder, ds, ds_grid)
+        if use_roms:
+            regridder, ds = get_ds_roms(regridder, ds, ds_grid)
+        else:
+            regridder, ds = get_ds(regridder, ds, LAT_NEW, LON_NEW)
 
         dss.append(ds)
         timestamps.append(timestamp)
@@ -71,12 +73,27 @@ def main():
         "-o",
         "--output",
         type=Path,
-        default=Path.home() / "FjordSim_data" / "NORA3",
+        default=Path.home() / "NORA3",
         help="Output directory for NetCDF files",
+    )
+    parser.add_argument(
+        "--use-roms",
+        action="store_true",
+        help="Use get_ds_roms for regridding instead of get_ds",
+    )
+    parser.add_argument(
+        "--start-year",
+        type=int,
+        help="Start year for data processing",
+    )
+    parser.add_argument(
+        "--end-year",
+        type=int,
+        help="End year for data processing",
     )
     args = parser.parse_args()
 
-    process_nora3(args.output)
+    process_nora3(args.output, use_roms=args.use_roms, start_year=args.start_year, end_year=args.end_year)
 
 
 if __name__ == "__main__":
