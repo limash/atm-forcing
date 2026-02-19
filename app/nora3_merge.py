@@ -24,7 +24,7 @@ def main() -> None:
         da = da.rename(var_name)
         filename = f"{var_name}.nc"
         da.to_netcdf(
-            Path.home() / "FjordSim_data" / "NORA3" / filename,
+            args.input_folder / filename,
             encoding={var_name: {"zlib": True, "complevel": 5}},
         )
         print(f"{filename} saved.")
