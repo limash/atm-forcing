@@ -6,6 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "atm-forcing"
 version = "0.1.0"
 requires-python = ">=3.10"
+# NOTE: the regridding stack (esmf, esmpy, xesmf) is conda-forge only and is not
+# listed here. Install it via conda first, then `uv pip install -e .` into that
+# env (see README Installation).
 dependencies = [
     "numpy",
     "pandas",

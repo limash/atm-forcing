@@ -6,8 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A pipeline that downloads NORA3 atmospheric reanalysis data from the met.no THREDDS
 OPeNDAP server and regrids it into forcing files for ocean models (ROMS-style).
-Covers the Oslofjord region by default. See `README.md` for conda/xesmf setup —
-`xesmf` must be installed via `conda install -c conda-forge xesmf`, not pip.
+Covers the Oslofjord region by default.
+
+Install is hybrid (see `README.md`): conda-forge supplies the ESMF stack
+(`esmf`/`esmpy`/`xesmf`, none on PyPI), then `uv pip install -e .` (run inside
+the activated conda env) installs the project + PyPI deps into that same env.
+`uv pip install` auto-targets the active env via `CONDA_PREFIX` — no env vars —
+and, unlike `uv sync`, doesn't remove the conda packages.
 
 ## Commands
 
