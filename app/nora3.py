@@ -16,7 +16,6 @@ from atm_forcing import CF_ROMS, ROMS_TIME_DIMS, generate_catalog_urls, get_ds, 
 
 LAT_NEW = np.arange(58.9, 60, 0.02)
 LON_NEW = np.arange(10.1, 11.1, 0.02)
-FILE_PATH_GRID = Path.home() / "dump_fram_nn9297k" / "ROHO800_grid_fix5.nc"
 REPO_URL = "https://github.com/limash/atm-forcing"
 
 
@@ -35,11 +34,17 @@ def _get_source_code_url():
         return REPO_URL
 
 
-def process_nora3(output_dir: Path, use_roms: bool = False, start_year: int = None, end_year: int = None):
+def process_nora3(
+    output_dir: Path,
+    use_roms: bool = False,
+    start_year: int = None,
+    end_year: int = None,
+    file_path_grid: Path = None,
+):
     output_dir.mkdir(parents=True, exist_ok=True)
     parameters = [x[0] for x in CF_ROMS]
     roms_names = [x[2] for x in CF_ROMS]
-    ds_grid = xr.open_dataset(FILE_PATH_GRID) if use_roms else None
+    ds_grid = xr.open_dataset(file_path_grid) if use_roms else None
     command = " ".join([Path(sys.argv[0]).name] + sys.argv[1:])
     source_code_url = _get_source_code_url()
 
@@ -100,7 +105,7 @@ def process_nora3(output_dir: Path, use_roms: bool = False, start_year: int = No
                     ds_out.attrs["command"] = command
 
                     print(f"Downloading, processing, saving {file_paths[name]}")
-                    ds_out.to_netcdf(file_paths[name], encoding={name: {"zlib": True, "complevel": 5}})
+                    ds_out.to_netcdf(file_paths[name])
 
                 variable_cycles = {name: [] for name in roms_names}
             else:
@@ -134,7 +139,7 @@ def main():
         "-o",
         "--output",
         type=Path,
-        default=Path.home() / "NORA3",
+        default=Path("/cluster/projects/nn9490k/NORA3/daily"),
         help="Output directory for NetCDF files",
     )
     parser.add_argument(
@@ -145,16 +150,30 @@ def main():
     parser.add_argument(
         "--start-year",
         type=int,
+        default=2009,
         help="Start year for data processing",
     )
     parser.add_argument(
         "--end-year",
         type=int,
+        default=2023,
         help="End year for data processing",
+    )
+    parser.add_argument(
+        "--file-path-grid",
+        type=Path,
+        default=Path("/cluster/projects/nn9490k/ROHO800/Grid/ROHO800_grid_v2.nc"),
+        help="Path to the ROMS grid file (used with --use-roms)",
     )
     args = parser.parse_args()
 
-    process_nora3(args.output, use_roms=args.use_roms, start_year=args.start_year, end_year=args.end_year)
+    process_nora3(
+        args.output,
+        use_roms=args.use_roms,
+        start_year=args.start_year,
+        end_year=args.end_year,
+        file_path_grid=args.file_path_grid,
+    )
 
 
 if __name__ == "__main__":

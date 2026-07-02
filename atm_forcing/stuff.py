@@ -233,12 +233,8 @@ def get_ds_roms(regridder, ds, ds_grid):
 
     da_specific_humidity = ds["specific_humidity_2m"].isel(height1=0)
     regridder, da_specific_humidity = regrid_curvilinear(regridder, da_specific_humidity, lat, lon)
-    # ROMS bulk_flux.F reads Qair as RH and treats values < 2.0 as fractional relative
-    # humidity; kg/kg specific humidity is always < 2.0 and would be misread. Convert to
-    # g/kg (typically 1-20) so ROMS's autodetection takes the specific-humidity branch.
-    da_specific_humidity = da_specific_humidity * 1000.0
     da_specific_humidity = da_specific_humidity.rename({"time": ROMS_TIME_DIMS["Qair"]})
-    da_specific_humidity.attrs["units"] = "g/kg"
+    da_specific_humidity.attrs["units"] = "kg/kg"
 
     da_air_temperature = ds["air_temperature_2m"].isel(height1=0)
     regridder, da_air_temperature = regrid_curvilinear(regridder, da_air_temperature, lat, lon)
@@ -253,10 +249,8 @@ def get_ds_roms(regridder, ds, ds_grid):
 
     da_air_pressure = ds["air_pressure_at_sea_level"].isel(height_above_msl=0)
     regridder, da_air_pressure = regrid_curvilinear(regridder, da_air_pressure, lat, lon)
-    # ROMS expects Pair in millibar; NORA3 provides Pa.
-    da_air_pressure = da_air_pressure / 100.0
     da_air_pressure = da_air_pressure.rename({"time": ROMS_TIME_DIMS["Pair"]})
-    da_air_pressure.attrs["units"] = "millibar"
+    da_air_pressure.attrs["units"] = "Pa"
 
     da_lwrad_acc = ds["integral_of_surface_downwelling_longwave_flux_in_air_wrt_time"].isel(height0=0)
     regridder, da_lwrad_acc = regrid_curvilinear(regridder, da_lwrad_acc, lat, lon)
