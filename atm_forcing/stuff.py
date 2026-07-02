@@ -22,6 +22,8 @@ CF_ROMS = (
     # ("cloud_area_fraction", "height3", "cloud", "cloud_time"),
 )
 
+ROMS_TIME_DIMS = {roms_name: roms_time_name for _, _, roms_name, roms_time_name in CF_ROMS}
+
 
 def lonlat_to_angle(lon, lat):
     # this returns angle from east to the current x
@@ -143,11 +145,17 @@ def get_winds(ds):
     return da_u_wind_10m, da_v_wind_10m
 
 
-def deaccumulate(da_acc):
-    # diff labels each value with the interval's end time; relabel with the interval midpoint.
+def midpoint_time(time):
+    # the interval midpoint, for relabeling a diffed variable's end-of-interval timestamps.
+    return time.values[:-1] + (time.values[1:] - time.values[:-1]) / 2
+
+
+def deaccumulate(da_acc, time_dim="time_acc"):
+    # relabeled to the interval midpoint and moved off the shared "time" dim so it
+    # doesn't get force-aligned with instantaneous variables still on endpoint labels.
     da = da_acc.diff(dim="time") / (60 * 60)
-    midpoint = da_acc.time.values[:-1] + (da_acc.time.values[1:] - da_acc.time.values[:-1]) / 2
-    return da.assign_coords(time=midpoint)
+    da = da.assign_coords(time=midpoint_time(da_acc.time))
+    return da.rename({"time": time_dim})
 
 
 def get_ds(regridder, ds, lat, lon):
@@ -201,23 +209,26 @@ def get_ds(regridder, ds, lat, lon):
             # "cloud_area_fraction": da_cloud_area_fraction,
         }
     )
-    time_aligned = da_swrad.time
-    return regridder, ds_out.reindex(time=time_aligned).reset_coords(drop=True)
+    return regridder, ds_out
 
 
 def get_ds_roms(regridder, ds, ds_grid):
+    """Regrid onto the ROMS grid and return {roms_name: da}, one DataArray per
+    variable, each on its own ROMS_TIME_DIMS-named time dimension."""
     lat, lon = ds_grid.lat_rho, ds_grid.lon_rho
     da_u_wind_10m, da_v_wind_10m = get_winds(ds)
     regridder, da_u_wind_10m = regrid_curvilinear(regridder, da_u_wind_10m, lat, lon)
     regridder, da_v_wind_10m = regrid_curvilinear(regridder, da_v_wind_10m, lat, lon)
     # assuming that angle is from east to x (but it is called 'is between x and east')
     da_x_wind_10m, da_y_wind_10m = rotate_u_v(ds_grid.angle.values, da_u_wind_10m, da_v_wind_10m)
+    da_x_wind_10m = da_x_wind_10m.rename({"time": ROMS_TIME_DIMS["Uwind"]})
     da_x_wind_10m.attrs["units"] = "m/s"
+    da_y_wind_10m = da_y_wind_10m.rename({"time": ROMS_TIME_DIMS["Vwind"]})
     da_y_wind_10m.attrs["units"] = "m/s"
 
     da_swrad_acc = ds["integral_of_surface_net_downward_shortwave_flux_wrt_time"].isel(height0=0)
     regridder, da_swrad_acc = regrid_curvilinear(regridder, da_swrad_acc, lat, lon)
-    da_swrad = deaccumulate(da_swrad_acc)
+    da_swrad = deaccumulate(da_swrad_acc, time_dim=ROMS_TIME_DIMS["swrad"])
     da_swrad.attrs["units"] = "W/m^2"
 
     da_specific_humidity = ds["specific_humidity_2m"].isel(height1=0)
@@ -226,46 +237,46 @@ def get_ds_roms(regridder, ds, ds_grid):
     # humidity; kg/kg specific humidity is always < 2.0 and would be misread. Convert to
     # g/kg (typically 1-20) so ROMS's autodetection takes the specific-humidity branch.
     da_specific_humidity = da_specific_humidity * 1000.0
+    da_specific_humidity = da_specific_humidity.rename({"time": ROMS_TIME_DIMS["Qair"]})
     da_specific_humidity.attrs["units"] = "g/kg"
 
     da_air_temperature = ds["air_temperature_2m"].isel(height1=0)
     regridder, da_air_temperature = regrid_curvilinear(regridder, da_air_temperature, lat, lon)
     da_air_temperature -= 273.15
+    da_air_temperature = da_air_temperature.rename({"time": ROMS_TIME_DIMS["Tair"]})
     da_air_temperature.attrs["units"] = "degC"
 
     da_precipitation_acc = ds["precipitation_amount_acc"].isel(height0=0)
     regridder, da_precipitation_acc = regrid_curvilinear(regridder, da_precipitation_acc, lat, lon)
-    da_precipitation = deaccumulate(da_precipitation_acc)
+    da_precipitation = deaccumulate(da_precipitation_acc, time_dim=ROMS_TIME_DIMS["rain"])
     da_precipitation.attrs["units"] = "kg/m^2/s"
 
     da_air_pressure = ds["air_pressure_at_sea_level"].isel(height_above_msl=0)
     regridder, da_air_pressure = regrid_curvilinear(regridder, da_air_pressure, lat, lon)
     # ROMS expects Pair in millibar; NORA3 provides Pa.
     da_air_pressure = da_air_pressure / 100.0
+    da_air_pressure = da_air_pressure.rename({"time": ROMS_TIME_DIMS["Pair"]})
     da_air_pressure.attrs["units"] = "millibar"
 
     da_lwrad_acc = ds["integral_of_surface_downwelling_longwave_flux_in_air_wrt_time"].isel(height0=0)
     regridder, da_lwrad_acc = regrid_curvilinear(regridder, da_lwrad_acc, lat, lon)
-    da_lwrad = deaccumulate(da_lwrad_acc)
+    da_lwrad = deaccumulate(da_lwrad_acc, time_dim=ROMS_TIME_DIMS["lwrad_down"])
     da_lwrad.attrs["units"] = "W/m^2"
 
-    ds_out = xr.Dataset(
-        {
-            "Uwind": da_x_wind_10m,
-            "Vwind": da_y_wind_10m,
-            "swrad": da_swrad,
-            "Qair": da_specific_humidity,
-            "Tair": da_air_temperature,
-            "rain": da_precipitation,
-            "Pair": da_air_pressure,
-            "lwrad_down": da_lwrad,
-        }
-    )
-    time_aligned = da_swrad.time
-    return regridder, ds_out.reindex(time=time_aligned).reset_coords(drop=True)
+    variables = {
+        "Uwind": da_x_wind_10m,
+        "Vwind": da_y_wind_10m,
+        "swrad": da_swrad,
+        "Qair": da_specific_humidity,
+        "Tair": da_air_temperature,
+        "rain": da_precipitation,
+        "Pair": da_air_pressure,
+        "lwrad_down": da_lwrad,
+    }
+    return regridder, {name: da.rename(name) for name, da in variables.items()}
 
 
-def generate_catalog_urls(start_year=2010, end_year=2020):
+def generate_catalog_urls(start_year, end_year):
     hours = 0, 6, 12, 18
     for year in range(start_year, end_year + 1):
         for month in range(1, 13):

@@ -1,5 +1,6 @@
 from .stuff import (  # noqa: F401
     CF_ROMS,
+    ROMS_TIME_DIMS,
     generate_catalog_urls,
     get_ds,
     get_ds_roms,
