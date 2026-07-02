@@ -221,16 +221,14 @@ def get_ds_roms(regridder, ds, ds_grid):
 
     ds_out = xr.Dataset(
         {
-            "u_wind_10m": da_u_wind_10m,
-            "v_wind_10m": da_v_wind_10m,
-            "x_wind_10m": da_x_wind_10m,
-            "y_wind_10m": da_y_wind_10m,
+            "Uwind": da_x_wind_10m,
+            "Vwind": da_y_wind_10m,
             "swrad": da_swrad,
-            "specific_humidity_2m": da_specific_humidity,
-            "air_temperature_2m": da_air_temperature,
-            "precipitation": da_precipitation,
-            "air_pressure_at_sea_level": da_air_pressure,
-            "lwrad": da_lwrad,
+            "Qair": da_specific_humidity,
+            "Tair": da_air_temperature,
+            "rain": da_precipitation,
+            "Pair": da_air_pressure,
+            "lwrad_down": da_lwrad,
         }
     )
     time_aligned = da_swrad.time
