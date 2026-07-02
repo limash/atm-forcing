@@ -147,28 +147,36 @@ def get_ds(regridder, ds, lat, lon):
     da_u_wind_10m, da_v_wind_10m = get_winds(ds)
     regridder, da_u_wind_10m = regrid(regridder, da_u_wind_10m, lat, lon)
     regridder, da_v_wind_10m = regrid(regridder, da_v_wind_10m, lat, lon)
+    da_u_wind_10m.attrs["units"] = "m/s"
+    da_v_wind_10m.attrs["units"] = "m/s"
 
     da_swrad_acc = ds["integral_of_surface_net_downward_shortwave_flux_wrt_time"].isel(height0=0)
     regridder, da_swrad_acc = regrid(regridder, da_swrad_acc, lat, lon)
     da_swrad = da_swrad_acc.diff(dim="time") / (60 * 60)
+    da_swrad.attrs["units"] = "W/m^2"
 
     da_specific_humidity = ds["specific_humidity_2m"].isel(height1=0)
     regridder, da_specific_humidity = regrid(regridder, da_specific_humidity, lat, lon)
+    da_specific_humidity.attrs["units"] = "kg/kg"
 
     da_air_temperature = ds["air_temperature_2m"].isel(height1=0)
     regridder, da_air_temperature = regrid(regridder, da_air_temperature, lat, lon)
     da_air_temperature -= 273.15
+    da_air_temperature.attrs["units"] = "degC"
 
     da_precipitation_acc = ds["precipitation_amount_acc"].isel(height0=0)
     regridder, da_precipitation_acc = regrid(regridder, da_precipitation_acc, lat, lon)
     da_precipitation = da_precipitation_acc.diff(dim="time") / (60 * 60)
+    da_precipitation.attrs["units"] = "kg/m^2/s"
 
     da_air_pressure = ds["air_pressure_at_sea_level"].isel(height_above_msl=0)
     regridder, da_air_pressure = regrid(regridder, da_air_pressure, lat, lon)
+    da_air_pressure.attrs["units"] = "Pa"
 
     da_lwrad_acc = ds["integral_of_surface_downwelling_longwave_flux_in_air_wrt_time"].isel(height0=0)
     regridder, da_lwrad_acc = regrid(regridder, da_lwrad_acc, lat, lon)
     da_lwrad = da_lwrad_acc.diff(dim="time") / (60 * 60)
+    da_lwrad.attrs["units"] = "W/m^2"
 
     # da_cloud_area_fraction = ds["cloud_area_fraction"].isel(height3=0)
     # regridder, da_cloud_area_fraction = regrid(regridder, da_cloud_area_fraction)
@@ -197,27 +205,42 @@ def get_ds_roms(regridder, ds, ds_grid):
     regridder, da_v_wind_10m = regrid_curvilinear(regridder, da_v_wind_10m, lat, lon)
     # assuming that angle is from east to x (but it is called 'is between x and east')
     da_x_wind_10m, da_y_wind_10m = rotate_u_v(ds_grid.angle.values, da_u_wind_10m, da_v_wind_10m)
+    da_x_wind_10m.attrs["units"] = "m/s"
+    da_y_wind_10m.attrs["units"] = "m/s"
 
     da_swrad_acc = ds["integral_of_surface_net_downward_shortwave_flux_wrt_time"].isel(height0=0)
     regridder, da_swrad_acc = regrid_curvilinear(regridder, da_swrad_acc, lat, lon)
     da_swrad = da_swrad_acc.diff(dim="time") / (60 * 60)
+    da_swrad.attrs["units"] = "W/m^2"
 
     da_specific_humidity = ds["specific_humidity_2m"].isel(height1=0)
     regridder, da_specific_humidity = regrid_curvilinear(regridder, da_specific_humidity, lat, lon)
+    # ROMS bulk_flux.F reads Qair as RH and treats values < 2.0 as fractional relative
+    # humidity; kg/kg specific humidity is always < 2.0 and would be misread. Convert to
+    # g/kg (typically 1-20) so ROMS's autodetection takes the specific-humidity branch.
+    da_specific_humidity = da_specific_humidity * 1000.0
+    da_specific_humidity.attrs["units"] = "g/kg"
 
     da_air_temperature = ds["air_temperature_2m"].isel(height1=0)
     regridder, da_air_temperature = regrid_curvilinear(regridder, da_air_temperature, lat, lon)
     da_air_temperature -= 273.15
+    da_air_temperature.attrs["units"] = "degC"
 
     da_precipitation_acc = ds["precipitation_amount_acc"].isel(height0=0)
     regridder, da_precipitation_acc = regrid_curvilinear(regridder, da_precipitation_acc, lat, lon)
     da_precipitation = da_precipitation_acc.diff(dim="time") / (60 * 60)
+    da_precipitation.attrs["units"] = "kg/m^2/s"
 
     da_air_pressure = ds["air_pressure_at_sea_level"].isel(height_above_msl=0)
     regridder, da_air_pressure = regrid_curvilinear(regridder, da_air_pressure, lat, lon)
+    # ROMS expects Pair in millibar; NORA3 provides Pa.
+    da_air_pressure = da_air_pressure / 100.0
+    da_air_pressure.attrs["units"] = "millibar"
+
     da_lwrad_acc = ds["integral_of_surface_downwelling_longwave_flux_in_air_wrt_time"].isel(height0=0)
     regridder, da_lwrad_acc = regrid_curvilinear(regridder, da_lwrad_acc, lat, lon)
     da_lwrad = da_lwrad_acc.diff(dim="time") / (60 * 60)
+    da_lwrad.attrs["units"] = "W/m^2"
 
     ds_out = xr.Dataset(
         {
