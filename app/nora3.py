@@ -4,6 +4,8 @@ Process NORA3 atmospheric forcing data and save locally as daily regridded NetCD
 """
 
 import argparse
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -15,12 +17,30 @@ from atm_forcing import CF_ROMS, generate_catalog_urls, get_ds, get_ds_roms  # n
 LAT_NEW = np.arange(58.9, 60, 0.02)
 LON_NEW = np.arange(10.1, 11.1, 0.02)
 FILE_PATH_GRID = Path.home() / "dump_fram_nn9297k" / "ROHO800_grid_fix5.nc"
+REPO_URL = "https://github.com/limash/atm-forcing"
+
+
+def _get_source_code_url():
+    try:
+        commit = (
+            subprocess.check_output(
+                ["git", "-C", str(Path(__file__).parent), "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
+        return f"{REPO_URL}/commit/{commit}"
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return REPO_URL
 
 
 def process_nora3(output_dir: Path, use_roms: bool = False, start_year: int = None, end_year: int = None):
     output_dir.mkdir(parents=True, exist_ok=True)
     parameters = [x[0] for x in CF_ROMS]
     ds_grid = xr.open_dataset(FILE_PATH_GRID) if use_roms else None
+    command = " ".join([Path(sys.argv[0]).name] + sys.argv[1:])
+    source_code_url = _get_source_code_url()
 
     regridder = None
     dss = []
@@ -59,6 +79,8 @@ def process_nora3(output_dir: Path, use_roms: bool = False, start_year: int = No
                 dss, coords=["time"], join="outer", combine_attrs="override", compat="no_conflicts"
             )
             ds_out = ds_out.sel(time=~ds_out.get_index("time").duplicated())
+            ds_out.attrs["source_code"] = source_code_url
+            ds_out.attrs["command"] = command
 
             print(f"Downloading, processing, saving {file_path}")
             ds_out.to_netcdf(file_path, encoding={var: {"zlib": True, "complevel": 5} for var in ds.data_vars})
