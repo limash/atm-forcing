@@ -57,6 +57,7 @@ def process_nora3(
     end_year: int = None,
     file_path_grid: Path = None,
 ):
+    output_dir = output_dir / "daily"
     output_dir.mkdir(parents=True, exist_ok=True)
     parameters = [x[0] for x in CF_ROMS]
     roms_names = [x[2] for x in CF_ROMS]
@@ -155,7 +156,7 @@ def main():
         "-o",
         "--output",
         type=Path,
-        default=Path("/cluster/projects/nn9490k/NORA3/daily"),
+        default=Path("/cluster/projects/nn9490k/NORA3"),
         help="Output directory for NetCDF files",
     )
     parser.add_argument(
