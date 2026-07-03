@@ -22,6 +22,9 @@ dependencies = [
     "siphon",
 ]
 
+[project.optional-dependencies]
+dev = ["ruff"]
+
 [tool.setuptools.packages.find]
 include = ["atm_forcing"]
 
