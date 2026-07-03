@@ -18,6 +18,7 @@ from atm_forcing import CF_ROMS, ROMS_TIME_DIMS, generate_catalog_urls, get_ds, 
 
 LAT_NEW = np.arange(58.9, 60, 0.02)
 LON_NEW = np.arange(10.1, 11.1, 0.02)
+TIME_UNITS = "days since 1948-01-01 00:00:00"
 REPO_URL = "https://github.com/limash/atm-forcing"
 CATALOG_RETRIES = 4
 CATALOG_BACKOFF_SECONDS = 5
@@ -137,7 +138,9 @@ def process_nora3(
                     ds_out.attrs["command"] = command
 
                     print(f"Downloading, processing, saving {file_paths[name]}")
-                    ds_out.to_netcdf(file_paths[name])
+                    ds_out.to_netcdf(
+                        file_paths[name], encoding={time_dim: {"units": TIME_UNITS, "dtype": "float64"}}
+                    )
 
                 variable_cycles = {name: [] for name in roms_names}
             else:
