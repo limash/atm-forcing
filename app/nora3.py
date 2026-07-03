@@ -56,6 +56,7 @@ def process_nora3(
     start_year: int = None,
     end_year: int = None,
     file_path_grid: Path = None,
+    debug: bool = False,
 ):
     output_dir = output_dir / "daily"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -92,6 +93,8 @@ def process_nora3(
             data_vars="all",
         )
         ds = ds[parameters]
+        if debug:
+            ds = ds.load()
 
         if use_roms:
             regridder, cycle = get_ds_roms(regridder, ds, ds_grid)
@@ -182,6 +185,11 @@ def main():
         default=Path("/cluster/projects/nn9490k/ROHO800/Grid/ROHO800_grid_v2.nc"),
         help="Path to the ROMS grid file (used with --use-roms)",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Disable lazy (dask) computation and load each cycle's data eagerly",
+    )
     args = parser.parse_args()
 
     process_nora3(
@@ -190,6 +198,7 @@ def main():
         start_year=args.start_year,
         end_year=args.end_year,
         file_path_grid=args.file_path_grid,
+        debug=args.debug,
     )
 
 
