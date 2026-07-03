@@ -6,10 +6,12 @@ Process NORA3 atmospheric forcing data and save locally as daily regridded NetCD
 import argparse
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
 import xarray as xr
+from requests.exceptions import HTTPError
 from siphon.catalog import TDSCatalog
 
 from atm_forcing import CF_ROMS, ROMS_TIME_DIMS, generate_catalog_urls, get_ds, get_ds_roms  # noqa: F401
@@ -17,6 +19,20 @@ from atm_forcing import CF_ROMS, ROMS_TIME_DIMS, generate_catalog_urls, get_ds, 
 LAT_NEW = np.arange(58.9, 60, 0.02)
 LON_NEW = np.arange(10.1, 11.1, 0.02)
 REPO_URL = "https://github.com/limash/atm-forcing"
+CATALOG_RETRIES = 4
+CATALOG_BACKOFF_SECONDS = 5
+
+
+def _open_catalog_with_retry(catalog_url):
+    for attempt in range(CATALOG_RETRIES):
+        try:
+            return TDSCatalog(catalog_url)
+        except HTTPError:
+            if attempt == CATALOG_RETRIES - 1:
+                raise
+            wait = CATALOG_BACKOFF_SECONDS * 2**attempt
+            print(f"Catalog fetch failed for {catalog_url}, retrying in {wait}s...")
+            time.sleep(wait)
 
 
 def _get_source_code_url():
@@ -65,7 +81,7 @@ def process_nora3(
             if file_path.exists():
                 continue
 
-        cat = TDSCatalog(catalog_url)
+        cat = _open_catalog_with_retry(catalog_url)
         urls = [v.access_urls["opendap"] for k, v in cat.datasets.items() if "_fp" in k]
 
         ds = xr.open_mfdataset(
