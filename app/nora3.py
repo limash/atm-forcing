@@ -58,7 +58,7 @@ def _get_source_code_url():
             .decode()
             .strip()
         )
-        return f"{REPO_URL}/commit/{commit}"
+        return f"{REPO_URL}/tree/{commit}"
     except (subprocess.CalledProcessError, FileNotFoundError):
         return REPO_URL
 
@@ -139,7 +139,11 @@ def process_nora3(
 
                     print(f"Downloading, processing, saving {file_paths[name]}")
                     ds_out.to_netcdf(
-                        file_paths[name], encoding={time_dim: {"units": TIME_UNITS, "dtype": "float64"}}
+                        file_paths[name],
+                        encoding={
+                            time_dim: {"units": TIME_UNITS, "dtype": "float64"},
+                            name: {"coordinates": None},
+                        },
                     )
 
                 variable_cycles = {name: [] for name in roms_names}
