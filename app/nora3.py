@@ -35,6 +35,18 @@ def _open_catalog_with_retry(catalog_url):
             time.sleep(wait)
 
 
+def _open_mfdataset_with_retry(urls, **kwargs):
+    for attempt in range(CATALOG_RETRIES):
+        try:
+            return xr.open_mfdataset(urls, **kwargs)
+        except OSError:
+            if attempt == CATALOG_RETRIES - 1:
+                raise
+            wait = CATALOG_BACKOFF_SECONDS * 2**attempt
+            print(f"Dataset open failed for {urls}, retrying in {wait}s...")
+            time.sleep(wait)
+
+
 def _get_source_code_url():
     try:
         commit = (
@@ -86,7 +98,7 @@ def process_nora3(
         cat = _open_catalog_with_retry(catalog_url)
         urls = [v.access_urls["opendap"] for k, v in cat.datasets.items() if "_fp" in k]
 
-        ds = xr.open_mfdataset(
+        ds = _open_mfdataset_with_retry(
             urls,
             combine="by_coords",
             compat="no_conflicts",
