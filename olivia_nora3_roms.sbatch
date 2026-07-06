@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=nn9297k
+#SBATCH --account=nn9490k
 #SBATCH --job-name=nora3_roms
 #SBATCH --time=7-00:00:00
 #SBATCH --ntasks=1
