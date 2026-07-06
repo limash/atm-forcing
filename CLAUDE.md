@@ -79,7 +79,8 @@ There is no test suite. `notebooks/nora3.ipynb` is exploratory.
 - Wind handling: `get_winds` derives east/north components from NORA3's
   `x_wind_10m`/`y_wind_10m` by computing the grid rotation `angle` from the 2D
   lat/lon coords (`lonlat_to_angle`) and de-rotating (`rotate_u_v`).
-- Output is always written zlib-compressed at `complevel=5`.
+- `get_ds` output is always written zlib-compressed at `complevel=5`. `get_ds_roms` output
+  (the per-variable ROMS files) is written uncompressed, intentionally.
 
 ## Conventions
 

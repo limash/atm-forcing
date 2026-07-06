@@ -48,6 +48,12 @@ def _open_mfdataset_with_retry(urls, **kwargs):
             time.sleep(wait)
 
 
+def _to_netcdf_atomic(ds, path, **kwargs):
+    tmp_path = path.with_name(path.name + ".tmp")
+    ds.to_netcdf(tmp_path, **kwargs)
+    tmp_path.rename(path)
+
+
 def _get_source_code_url():
     try:
         commit = (
@@ -136,14 +142,17 @@ def process_nora3(
                     ds_out = ds_out.sel({time_dim: ~ds_out.get_index(time_dim).duplicated()})
                     ds_out.attrs["source_code"] = source_code_url
                     ds_out.attrs["command"] = command
+                    # Set directly on the variable's encoding rather than passing via
+                    # to_netcdf's encoding= kwarg: that kwarg overwrites .encoding after
+                    # xarray has already resolved the "coordinates" attr, so the netCDF4
+                    # backend still sees (and rejects) the key.
+                    ds_out[name].encoding["coordinates"] = None
 
                     print(f"Downloading, processing, saving {file_paths[name]}")
-                    ds_out.to_netcdf(
+                    _to_netcdf_atomic(
+                        ds_out,
                         file_paths[name],
-                        encoding={
-                            time_dim: {"units": TIME_UNITS, "dtype": "float64"},
-                            name: {"coordinates": None},
-                        },
+                        encoding={time_dim: {"units": TIME_UNITS, "dtype": "float64"}},
                     )
 
                 variable_cycles = {name: [] for name in roms_names}
@@ -165,7 +174,9 @@ def process_nora3(
                 ds_out.attrs["command"] = command
 
                 print(f"Downloading, processing, saving {file_path}")
-                ds_out.to_netcdf(file_path, encoding={var: {"zlib": True, "complevel": 5} for var in ds_out.data_vars})
+                _to_netcdf_atomic(
+                    ds_out, file_path, encoding={var: {"zlib": True, "complevel": 5} for var in ds_out.data_vars}
+                )
 
                 dss = []
 
