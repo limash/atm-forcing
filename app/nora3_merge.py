@@ -22,6 +22,12 @@ def parse_args() -> argparse.Namespace:
         default=Path("/cluster/projects/nn9490k/NORA3"),
         help="Base output directory; daily files are read from <output>/daily, monthly files written to <output>/monthly.",
     )
+    parser.add_argument(
+        "--year",
+        type=int,
+        default=None,
+        help="Year to process. If omitted, all available years are processed.",
+    )
     return parser.parse_args()
 
 
@@ -53,7 +59,9 @@ def main() -> None:
 
     for name in ROMS_NAMES:
         time_dim = ROMS_TIME_DIMS[name]
-        files = sorted(daily_dir.glob(f"{name}_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].nc"))
+        year_glob = f"{args.year}[0-9][0-9]" if args.year else "[0-9][0-9][0-9][0-9][0-9][0-9]"
+        pattern = f"{name}_{year_glob}[0-9][0-9].nc"
+        files = sorted(daily_dir.glob(pattern))
 
         months = defaultdict(list)
         for f in files:
@@ -61,6 +69,11 @@ def main() -> None:
             months[date_str[:6]].append(f)
 
         for yyyymm, month_files in sorted(months.items()):
+            filename = f"{name}_{yyyymm}.nc"
+            if (monthly_dir / filename).exists():
+                print(f"{filename} already exists, skipping.")
+                continue
+
             ds = xr.open_mfdataset(
                 month_files,
                 combine="by_coords",
@@ -72,7 +85,6 @@ def main() -> None:
             )
             ds = _dedup_and_check_gaps(ds, time_dim, f"{name} {yyyymm}")
 
-            filename = f"{name}_{yyyymm}.nc"
             ds.to_netcdf(
                 monthly_dir / filename,
                 encoding={name: {"zlib": True, "complevel": 5}},
