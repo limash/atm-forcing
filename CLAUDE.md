@@ -26,9 +26,8 @@ python app/nora3.py -o /where/to/save --use-roms
 # Download raw NORA3 (no regridding/variable selection)
 python app/nora3_download.py -o /where/to/save --start-year 2020 --end-year 2025
 
-# Merge per-day files into one file per variable (rectilinear `get_ds` output only;
-# not updated for --use-roms's per-variable daily files)
-python app/nora3_merge.py --input-folder ~/NORA3
+# Merge --use-roms's per-variable daily files into one file per variable per month
+python app/nora3_merge.py -o /where/to/save [--year 2020]
 
 # Lint
 ruff check .
@@ -55,9 +54,10 @@ There is no test suite. `notebooks/nora3.ipynb` is exploratory.
 - `get_ds_roms` → `regrid_curvilinear`: bilinear interpolation onto a curvilinear
   ROMS grid read from `FILE_PATH_GRID` (`lat_rho`/`lon_rho`). Additionally rotates
   the regridded winds into grid-relative `x_wind_10m`/`y_wind_10m` using the grid's
-  `angle` field. `FILE_PATH_GRID` is a hardcoded path under `~/dump_fram_nn9297k/`.
-  Writes one `YYYYMMDD_{roms_name}.nc` per variable per day (8 files/day), since
-  `get_ds_roms` returns a `{roms_name: da}` dict instead of a merged dataset.
+  `angle` field. `FILE_PATH_GRID` defaults to a hardcoded Sigma2/NIRD project path,
+  overridable via `--file-path-grid`. Writes one `<roms_name>_YYYYMMDD.nc` per
+  variable per day (8 files/day), since `get_ds_roms` returns a `{roms_name: da}`
+  dict instead of a merged dataset.
 
 ### Non-obvious data handling
 

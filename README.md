@@ -34,8 +34,46 @@ installs the project and its PyPI dependencies into the same environment.
 > everything, use [pixi](https://pixi.sh) instead of conda + uv.
 
 ## Usage
-With the `atm-forcing` env active, run `python app/nora3.py -o where/to/save`.
 
-This command downloads the NORA3 dataset and interpolates it to the lat–lon grid covering the Oslofjord region for the years 2010–2020.
-**Note:** The process may take several days to complete.
-You can adjust the spatial domain by modifying the settings in `nora3.py`.
+With the `atm-forcing` env active, run one of the scripts below. All of them download
+6-hourly NORA3 analysis cycles from the met.no THREDDS OPeNDAP server; already-downloaded
+daily files are skipped, so runs are resumable after interruptions or failures.
+**Note:** downloading a full year range can take several days.
+
+### Download + regrid to a lat–lon grid (main entry point)
+```bash
+python app/nora3.py -o /where/to/save [--start-year 2009] [--end-year 2023]
+```
+Bilinearly regrids onto a rectilinear lat–lon grid covering the Oslofjord region
+(`LAT_NEW`/`LON_NEW` in `app/nora3.py` — edit these to change the domain), writing
+one merged `<output>/daily/YYYYMMDD.nc` per day.
+
+### Download + regrid onto a ROMS grid
+```bash
+python app/nora3.py -o /where/to/save --use-roms --file-path-grid /path/to/grid.nc
+```
+Bilinearly regrids onto a curvilinear ROMS grid (`lat_rho`/`lon_rho`) and rotates winds
+into grid-relative `x_wind_10m`/`y_wind_10m` using the grid's `angle` field. Since each
+ROMS variable has its own time dimension, this writes one file per variable per day:
+`<output>/daily/<roms_name>_YYYYMMDD.nc` (8 files/day, uncompressed).
+
+### Merge daily ROMS files into monthly files
+```bash
+python app/nora3_merge.py -o /where/to/save [--year 2020]
+```
+For `--use-roms` output only: merges the per-variable daily files in `<output>/daily/`
+into one file per variable per month in `<output>/monthly/`, skipping months that already
+have an output file and warning about duplicate or missing timestamps. Omit `--year` to
+process all available years.
+
+### Download raw NORA3 (no regridding)
+```bash
+python app/nora3_download.py -o /where/to/save [--start-year 2020 --end-year 2025]
+```
+Downloads the full NORA3 dataset with no variable selection or regridding, as one merged
+`<output>/YYYYMMDD.nc` per day.
+
+All three scripts accept `--debug` to disable lazy (dask) loading, which can help when
+diagnosing errors. `-o` defaults to a Sigma2/NIRD project path in `nora3.py` and
+`nora3_merge.py` — pass your own path for local use. `olivia_nora3_roms.sbatch` is an
+example Slurm batch script for running `nora3.py --use-roms` on a cluster.
