@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
 
 def _dedup_and_check_gaps(ds: xr.Dataset, time_dim: str, label: str) -> xr.Dataset:
     index = ds.get_index(time_dim)
-    duplicated = index.duplicated()
+    duplicated = index.duplicated(keep="last")
     if duplicated.any():
         print(f"{label}: removing {duplicated.sum()} duplicate {time_dim} entries.")
         ds = ds.sel({time_dim: ~duplicated})
@@ -86,6 +86,7 @@ def process_variable(name: str, daily_dir: Path, monthly_dir: Path, year: int | 
             chunks={},
         )
         ds = _dedup_and_check_gaps(ds, time_dim, f"{name} {yyyymm}")
+        ds = ds.isel({time_dim: slice(None, -1)})
 
         ds.to_netcdf(
             monthly_dir / filename,
