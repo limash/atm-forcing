@@ -9,7 +9,7 @@ import dask
 import numpy as np
 import xarray as xr
 
-from atm_forcing import CF_ROMS, ROMS_TIME_DIMS
+from atm_forcing import ACCUMULATED_ROMS_NAMES, CF_ROMS, ROMS_TIME_DIMS
 
 ROMS_NAMES = [x[2] for x in CF_ROMS]
 
@@ -86,7 +86,8 @@ def process_variable(name: str, daily_dir: Path, monthly_dir: Path, year: int | 
             chunks={},
         )
         ds = _dedup_and_check_gaps(ds, time_dim, f"{name} {yyyymm}")
-        ds = ds.isel({time_dim: slice(None, -1)})
+        if name not in ACCUMULATED_ROMS_NAMES:
+            ds = ds.isel({time_dim: slice(None, -1)})
 
         ds.to_netcdf(
             monthly_dir / filename,

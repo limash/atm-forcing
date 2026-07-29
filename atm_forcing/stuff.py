@@ -23,6 +23,7 @@ CF_ROMS = (
 )
 
 ROMS_TIME_DIMS = {roms_name: roms_time_name for _, _, roms_name, roms_time_name in CF_ROMS}
+ACCUMULATED_ROMS_NAMES = {"swrad", "rain", "lwrad_down"}
 
 
 def lonlat_to_angle(lon, lat):

@@ -1,4 +1,5 @@
 from .stuff import (  # noqa: F401
+    ACCUMULATED_ROMS_NAMES,
     CF_ROMS,
     ROMS_TIME_DIMS,
     generate_catalog_urls,
