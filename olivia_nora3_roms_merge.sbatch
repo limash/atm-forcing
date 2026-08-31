@@ -3,7 +3,7 @@
 #SBATCH --job-name=nora3_roms
 #SBATCH --time=1-00:00:00
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=16G
 #SBATCH --output=nora3_roms_%j.log
 
