@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Process CARRA2 (CDS reanalysis-pan-carra) atmospheric forcing data and save locally as daily regridded NetCDF files.
+Process CARRA2 (CDS reanalysis-pan-carra) atmospheric forcing data and save locally as monthly regridded NetCDF files.
 
 Needs CDS credentials in ~/.cdsapirc and the dataset licence accepted on the CDS website.
 """
@@ -10,7 +10,7 @@ import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import cdsapi
@@ -30,7 +30,6 @@ from atm_forcing import (
 
 RETRIES = 4
 BACKOFF_SECONDS = 30
-TIME_DIMS = {"time", "time_acc", *ROMS_TIME_DIMS.values()}
 AREA_PAD_DEGREES = 0.5  # source data margin around the target grid for the interpolation
 
 
@@ -48,20 +47,16 @@ def _retrieve_with_retry(request, target):
             time.sleep(wait)
 
 
-def _month_chunks(start, end):
-    """Lists of consecutive days, one list per calendar month, between start and end (inclusive)."""
-    day = start
-    while day <= end:
-        month_end = (day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
-        last = min(end, month_end)
-        yield [day + timedelta(days=i) for i in range((last - day).days + 1)]
-        day = last + timedelta(days=1)
+def _next_month(month):
+    return (month.replace(day=28) + timedelta(days=4)).replace(day=1)
 
 
-def _select_day(obj, day):
-    # instantaneous variables keep the closing record (00:00 of the next day); accumulated ones are interval midpoints
-    start = np.datetime64(day)
-    return obj.sel({dim: slice(start, start + np.timedelta64(1, "D")) for dim in obj.dims if dim in TIME_DIMS})
+def _months(start, end):
+    """First days of the months from start to end (inclusive)."""
+    month = start
+    while month <= end:
+        yield month
+        month = _next_month(month)
 
 
 def process_carra2(
@@ -71,7 +66,7 @@ def process_carra2(
     end: date = None,
     file_path_grid: Path = None,
 ):
-    output_dir = output_dir / "daily"
+    output_dir = output_dir / "monthly"
     output_dir.mkdir(parents=True, exist_ok=True)
     roms_names = [x[2] for x in CF_ROMS]
     ds_grid = xr.open_dataset(file_path_grid) if use_roms else None
@@ -89,83 +84,82 @@ def process_carra2(
     regridder = None
 
     # One request set per month: the CDS queue takes minutes per request, so daily requests would be far too slow.
-    for days in _month_chunks(start, end):
-        timestamps = {day: day.strftime("%Y%m%d") for day in days}
+    for month in _months(start, end):
+        yyyymm = month.strftime("%Y%m")
         if use_roms:
-            file_paths = {
-                day: {name: output_dir / f"{name}_{ts}.nc" for name in roms_names} for day, ts in timestamps.items()
-            }
-            missing = [day for day in days if not all(p.exists() for p in file_paths[day].values())]
+            file_paths = {name: output_dir / f"{name}_{yyyymm}.nc" for name in roms_names}
+            if all(p.exists() for p in file_paths.values()):
+                continue
         else:
-            file_paths = {day: output_dir / f"{ts}.nc" for day, ts in timestamps.items()}
-            missing = [day for day in days if not file_paths[day].exists()]
-        if not missing:
-            continue
+            file_path = output_dir / f"{yyyymm}.nc"
+            if file_path.exists():
+                continue
 
+        days = [month + timedelta(days=i) for i in range((_next_month(month) - month).days)]
         # The full pan-Arctic GRIB is only needed to crop it: it lives in a temporary directory that is deleted as
         # soon as the cropped data is loaded.
-        label = f"{timestamps[days[0]]}-{timestamps[days[-1]]}"
-        analysis, analysis_next, forecast = carra_requests(days, area)
-        with tempfile.TemporaryDirectory(dir=output_dir, prefix=f"carra2_{label}_") as tmp:
+        with tempfile.TemporaryDirectory(dir=output_dir, prefix=f"carra2_{yyyymm}_") as tmp:
             tmp = Path(tmp)
-            # The three requests queue at CDS independently, so submit them together: waiting for one after
-            # the other adds up their queue times.
-            requests = {"analysis": analysis, "analysis_next": analysis_next, "forecast": forecast}
-            print(f"Downloading {', '.join(requests)} for {label}")
+            # The requests queue at CDS independently, so submit them together: waiting for one after the other
+            # adds up their queue times.
+            requests = dict(zip(("analysis", "forecast"), carra_requests(days, area)))
+            print(f"Downloading {', '.join(requests)} for {yyyymm}")
             with ThreadPoolExecutor(max_workers=len(requests)) as pool:
                 futures = [
                     pool.submit(_retrieve_with_retry, req, tmp / f"{name}.grib") for name, req in requests.items()
                 ]
                 for future in futures:
                     future.result()
-            dss_an = [open_carra_grib(tmp / f"{name}.grib", area) for name in ("analysis", "analysis_next")]
+            ds_an = open_carra_grib(tmp / "analysis.grib", area)
             ds_fc = open_carra_grib(tmp / "forecast.grib", area)
 
         attrs = {"source_code": source_code_url, "command": command}
         if use_roms:
-            regridder, variables = get_ds_roms_carra(regridder, dss_an, ds_fc, ds_grid)
-            for day in missing:
-                for name, da in variables.items():
-                    time_dim = ROMS_TIME_DIMS[name]
-                    ds_out = _select_day(da, day).to_dataset()
-                    ds_out.attrs.update(attrs)
-                    # see nora3.py: must be set on the variable's encoding, not via to_netcdf's encoding=
-                    ds_out[name].encoding["coordinates"] = None
-                    print(f"Processing, saving {file_paths[day][name]}")
-                    _to_netcdf_atomic(
-                        ds_out,
-                        file_paths[day][name],
-                        encoding={time_dim: {"units": TIME_UNITS, "dtype": "float64"}},
-                    )
-        else:
-            regridder, ds_month = get_ds_carra(regridder, dss_an, ds_fc, LAT_NEW, LON_NEW)
-            for day in missing:
-                ds_out = _select_day(ds_month, day)
+            regridder, variables = get_ds_roms_carra(regridder, ds_an, ds_fc, ds_grid)
+            for name, da in variables.items():
+                time_dim = ROMS_TIME_DIMS[name]
+                ds_out = da.to_dataset()
                 ds_out.attrs.update(attrs)
-                print(f"Processing, saving {file_paths[day]}")
+                # see nora3.py: must be set on the variable's encoding, not via to_netcdf's encoding=
+                ds_out[name].encoding["coordinates"] = None
+                print(f"Processing, saving {file_paths[name]}")
                 _to_netcdf_atomic(
                     ds_out,
-                    file_paths[day],
-                    encoding={var: {"zlib": True, "complevel": 5} for var in ds_out.data_vars},
+                    file_paths[name],
+                    encoding={
+                        name: {"zlib": True, "complevel": 5},
+                        time_dim: {"units": TIME_UNITS, "dtype": "float64"},
+                    },
                 )
+        else:
+            regridder, ds_out = get_ds_carra(regridder, ds_an, ds_fc, LAT_NEW, LON_NEW)
+            ds_out.attrs.update(attrs)
+            print(f"Processing, saving {file_path}")
+            _to_netcdf_atomic(
+                ds_out, file_path, encoding={var: {"zlib": True, "complevel": 5} for var in ds_out.data_vars}
+            )
+
+
+def _year_month(text):
+    return datetime.strptime(text, "%Y-%m").date()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Download and regrid CARRA2 atmospheric data.")
+    parser = argparse.ArgumentParser(description="Download and regrid CARRA2 atmospheric data into monthly files.")
     parser.add_argument(
         "-o",
         "--output",
         type=Path,
         default=Path("/cluster/projects/nn9490k/CARRA2"),
-        help="Output directory for NetCDF files",
+        help="Base output directory; monthly files are written to <output>/monthly",
     )
     parser.add_argument(
         "--use-roms",
         action="store_true",
-        help="Regrid onto the ROMS grid (one file per variable per day) instead of a lat/lon grid",
+        help="Regrid onto the ROMS grid (one file per variable per month) instead of a lat/lon grid",
     )
-    parser.add_argument("--start", type=date.fromisoformat, default=date(2009, 1, 1), help="First day, YYYY-MM-DD")
-    parser.add_argument("--end", type=date.fromisoformat, default=date(2023, 12, 31), help="Last day, YYYY-MM-DD")
+    parser.add_argument("--start", type=_year_month, default=date(2009, 1, 1), help="First month, YYYY-MM")
+    parser.add_argument("--end", type=_year_month, default=date(2023, 12, 1), help="Last month, YYYY-MM (inclusive)")
     parser.add_argument(
         "--file-path-grid",
         type=Path,
