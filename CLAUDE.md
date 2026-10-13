@@ -29,6 +29,10 @@ python app/nora3_download.py -o /where/to/save --start-year 2020 --end-year 2025
 # Merge --use-roms's per-variable daily files into one file per variable per month
 python app/nora3_merge.py -o /where/to/save [--year 2020]
 
+# Same pipeline for CARRA2 (CDS reanalysis-pan-carra; needs ~/.cdsapirc). Writes monthly files directly,
+# so nora3_merge.py is not used. --start/--end are YYYY-MM.
+python app/carra2.py -o /where/to/save [--use-roms] [--start 2020-01 --end 2020-02]
+
 # Lint
 ruff check .
 ```
@@ -58,6 +62,34 @@ There is no test suite. `notebooks/nora3.ipynb` is exploratory.
   overridable via `--file-path-grid`. Writes one `<roms_name>_YYYYMMDD.nc` per
   variable per day (8 files/day), since `get_ds_roms` returns a `{roms_name: da}`
   dict instead of a merged dataset.
+
+### CARRA2 path (`app/carra2.py`)
+
+Same output conventions as the NORA3 `--use-roms`/lat-lon paths, with these differences:
+
+- **Monthly requests, monthly output.** One `analysis` and one `forecast` request per month
+  (`carra_requests`), submitted concurrently in threads (CDS queues take minutes each, so
+  sequential or per-day requests are far too slow). Output is written straight to
+  `<output>/monthly/` in the layout `nora3_merge.py` produces, so no merge step. Instantaneous
+  variables have no closing next-month record, as in the merge output. `--start`/`--end` are months.
+- **Two products because accumulated fields exist only in the forecast.** Instantaneous variables
+  (u/v wind, 2 m temperature and humidity, MSLP) come from `analysis` (3-hourly); shortwave
+  (`ssr`), longwave (`strd`) and precipitation (`tp`) come from the 00/12 UTC `forecast`, leads
+  1–12 h (together they tile every hour). They accumulate from the forecast start, so
+  `deaccumulate_forecast()` prepends a zero at step 0, diffs per forecast start, and labels the
+  hourly intervals at midpoints on `time_acc`/the ROMS time dimension, like `deaccumulate()`.
+- **The CDS `area` key does not subset this dataset** — the full 2869 x 2869 pan-Arctic polar
+  stereographic grid (longitudes 0..360, up to the pole) always comes back. `open_carra_grib()`
+  crops it to the target bounding box + `AREA_PAD_DEGREES` and converts longitudes to -180..180
+  (without the crop `lonlat_to_angle` asserts on the 0/360 wrap and ESMF would build weights from
+  8M source points). The raw GRIB lives in a temp dir deleted after cropping.
+- **GRIB, not NetCDF** (the CDS NetCDF converter is experimental). Variables are found by their
+  `GRIB_shortName` attribute (`10u`, `10v`, `2t`, `2sh`, `msl`, `ssr`, `strd`, `tp`). CARRA2 winds
+  are relative to the polar grid, so they are de-rotated to east/north with `lonlat_to_angle` +
+  `rotate_u_v` like NORA3; the rotation was not checked against `10m_wind_direction`.
+- `get_ds_carra`/`get_ds_roms_carra` in `stuff.py` are the counterparts of `get_ds`/`get_ds_roms`.
+  `app/carra2.py` imports its helpers (`LAT_NEW`, `_to_netcdf_atomic`, ...) from `app/nora3.py`,
+  so it must be run as a script.
 
 ### Non-obvious data handling
 

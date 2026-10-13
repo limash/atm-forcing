@@ -1,4 +1,4 @@
-# NORA3 data fetching and processing for ocean models.
+# NORA3 and CARRA2 data fetching and processing for ocean models.
 
 ## Installation
 
@@ -35,7 +35,7 @@ installs the project and its PyPI dependencies into the same environment.
 
 ## Usage
 
-With the `atm-forcing` env active, run one of the scripts below. All of them download
+With the `atm-forcing` env active, run one of the scripts below. The NORA3 scripts download
 6-hourly NORA3 analysis cycles from the met.no THREDDS OPeNDAP server; already-downloaded
 daily files are skipped, so runs are resumable after interruptions or failures.
 **Note:** downloading a full year range can take several days.
@@ -66,6 +66,28 @@ into one file per variable per month in `<output>/monthly/`, skipping months tha
 have an output file and warning about duplicate or missing timestamps. Omit `--year` to
 process all available years.
 
+### Download + regrid CARRA2 into monthly files
+```bash
+python app/carra2.py -o /where/to/save --use-roms --file-path-grid /path/to/grid.nc \
+    [--start 2009-01 --end 2023-12]
+```
+The same job as `nora3.py`, but for CARRA2 (Copernicus pan-Arctic regional reanalysis,
+`reanalysis-pan-carra` on the [CDS](https://cds.climate.copernicus.eu/datasets/reanalysis-pan-carra)).
+Needs a CDS account with its key in `~/.cdsapirc` and the dataset licence accepted on the
+CDS website. Without `--use-roms` it regrids onto the lat–lon grid in `app/nora3.py`.
+
+- **Monthly output, no merge step.** Files are written directly to
+  `<output>/monthly/<roms_name>_YYYYMM.nc` (one per variable, compressed, like the output of
+  `nora3_merge.py`), or `<output>/monthly/YYYYMM.nc` without `--use-roms`. `--start`/`--end`
+  are months (`YYYY-MM`, inclusive); months that already have output files are skipped.
+- **Two CDS requests per month**, submitted together: the `analysis` product (3-hourly wind,
+  temperature, humidity, pressure) and the `forecast` product (hourly radiation and
+  precipitation, accumulated from the 00/12 UTC forecast starts, which the analysis does not
+  have). Each request waits in the CDS queue for minutes to over an hour.
+- **The full pan-Arctic grid is downloaded** (about 4 GB per month in total), because the CDS `area`
+  key does not subset this grid. The script crops it to the target domain and deletes the
+  downloaded GRIB files once the cropped data is loaded.
+
 ### Download raw NORA3 (no regridding)
 ```bash
 python app/nora3_download.py -o /where/to/save [--start-year 2020 --end-year 2025]
@@ -73,7 +95,7 @@ python app/nora3_download.py -o /where/to/save [--start-year 2020 --end-year 202
 Downloads the full NORA3 dataset with no variable selection or regridding, as one merged
 `<output>/YYYYMMDD.nc` per day.
 
-All three scripts accept `--debug` to disable lazy (dask) loading, which can help when
+All three NORA3 scripts accept `--debug` to disable lazy (dask) loading, which can help when
 diagnosing errors. `-o` defaults to a Sigma2/NIRD project path in `nora3.py` and
 `nora3_merge.py` — pass your own path for local use. `olivia_nora3_roms.sbatch` is an
 example Slurm batch script for running `nora3.py --use-roms` on a cluster.
