@@ -1,5 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
+import cfgrib
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -285,6 +286,183 @@ def get_ds_roms(regridder, ds, ds_grid):
         "lwrad_down": da_lwrad,
     }
     return regridder, {name: da.rename(name) for name, da in variables.items()}
+
+
+CARRA_DATASET = "reanalysis-pan-carra"
+CARRA_ANALYSIS_VARIABLES = [
+    "10m_u_component_of_wind",
+    "10m_v_component_of_wind",
+    "2m_temperature",
+    "2m_specific_humidity",
+    "mean_sea_level_pressure",
+]
+# accumulated since the forecast start (J/m^2 for radiation, kg/m^2 for precipitation)
+CARRA_FORECAST_VARIABLES = [
+    "surface_net_solar_radiation",
+    "thermal_surface_radiation_downwards",
+    "total_precipitation",
+]
+# forecasts start at 00 and 12 UTC; leads 1..12 of both runs tile the whole day hourly
+CARRA_FORECAST_LEADTIMES = [str(h) for h in range(1, 13)]
+
+
+def carra_requests(days, area):
+    """CDS requests (analysis, analysis for 00:00 after the last day, forecast) for consecutive `days` of one month.
+
+    The extra 00:00 analysis is the closing record of the last daily instantaneous file, the same way the NORA3
+    daily files end on the next day's first record (nora3_merge.py relies on it).
+    `area` is [north, west, south, east].
+    """
+
+    def day(ds):
+        return {"year": f"{ds[0].year}", "month": f"{ds[0].month:02d}", "day": [f"{d.day:02d}" for d in ds]}
+
+    common = {"level_type": "single_levels", "data_format": "grib", "area": area}
+    analysis = {
+        **common,
+        "product_type": "analysis",
+        "variable": CARRA_ANALYSIS_VARIABLES,
+        "time": [f"{h:02d}:00" for h in range(0, 24, 3)],
+        **day(days),
+    }
+    analysis_next = {**analysis, "time": ["00:00"], **day([days[-1] + timedelta(days=1)])}
+    forecast = {
+        **common,
+        "product_type": "forecast",
+        "variable": CARRA_FORECAST_VARIABLES,
+        "time": ["00:00", "12:00"],
+        "leadtime_hour": CARRA_FORECAST_LEADTIMES,
+        **day(days),
+    }
+    return analysis, analysis_next, forecast
+
+
+def open_carra_grib(path, area):
+    """Open a CARRA2 GRIB file and crop it to `area` = [north, west, south, east].
+
+    The CDS "area" request key does not subset this grid (the full 2869 x 2869 pan-Arctic field comes back, with
+    longitudes spanning 0..360), so the crop happens here. Longitudes are returned in -180..180.
+    """
+    # cfgrib splits a file with mixed level types (10 m vs 2 m vs surface) into several datasets
+    dss = cfgrib.open_datasets(str(path))
+    north, west, south, east = area
+    lat = dss[0].latitude.values
+    lon = (dss[0].longitude.values + 180) % 360 - 180
+    ys, xs = np.nonzero((lat <= north) & (lat >= south) & (lon >= west) & (lon <= east))
+    window = {"y": slice(ys.min(), ys.max() + 1), "x": slice(xs.min(), xs.max() + 1)}
+    dss = [d.isel(window).drop_vars(["heightAboveGround", "surface", "meanSea"], errors="ignore") for d in dss]
+    dss = [d.assign_coords(longitude=(d.longitude + 180) % 360 - 180) for d in dss]
+    return xr.merge(dss, compat="override", join="exact").load()
+
+
+def _carra_var(ds, short_name):
+    for da in ds.data_vars.values():
+        if da.attrs.get("GRIB_shortName") == short_name:
+            return da
+    have = [d.attrs.get("GRIB_shortName") for d in ds.data_vars.values()]
+    raise KeyError(f"No variable with GRIB shortName {short_name!r}, have {have}")
+
+
+def _carra_instantaneous(dss, short_name):
+    # analysis: one valid time per record; concatenates the files (the day and the next day's 00:00)
+    das = []
+    for ds in dss:
+        da = _carra_var(ds, short_name)
+        if "time" not in da.dims:
+            da = da.expand_dims("time")
+        times = np.atleast_1d(da.valid_time.values)
+        das.append(da.drop_vars(["valid_time", "step"], errors="ignore").assign_coords(time=times))
+    return xr.concat(das, dim="time").sortby("time")
+
+
+def deaccumulate_forecast(da_acc, time_dim="time_acc"):
+    """Per-second rate from a (time, step, ...) accumulation since each forecast start.
+
+    The accumulation is zero at step 0, which is not in the data, so it is prepended; each hourly interval is then
+    labelled with its midpoint on `time_dim` (see deaccumulate() for why not the shared "time").
+    """
+    da_acc = da_acc.drop_vars("valid_time", errors="ignore")
+    if "time" not in da_acc.dims:
+        da_acc = da_acc.expand_dims("time")
+    pieces = []
+    for init in da_acc.time.values:
+        da_i = da_acc.sel(time=init)
+        zero = xr.zeros_like(da_i.isel(step=0)).assign_coords(step=np.timedelta64(0, "ns"))
+        full = xr.concat([zero, da_i], dim="step")
+        rate = full.diff(dim="step") / (60 * 60)
+        valid = init + full.step.values
+        rate = rate.assign_coords(step=valid[:-1] + (valid[1:] - valid[:-1]) / 2).rename({"step": time_dim})
+        pieces.append(rate.drop_vars("time"))
+    return xr.concat(pieces, dim=time_dim).sortby(time_dim)
+
+
+def _carra_fields(regridder, dss_an, ds_fc, regrid_fn):
+    """Regrid and convert the CARRA2 variables. regrid_fn(regridder, da) -> (regridder, da).
+
+    Returns {name: da} with ROMS names, except winds, which are "u"/"v" (east/north). Instantaneous variables
+    are on "time", the de-accumulated ones on "time_acc".
+    """
+    u, v = (_carra_instantaneous(dss_an, name) for name in ("10u", "10v"))
+    # CARRA2 winds follow the polar stereographic grid: de-rotate to east/north on the source grid
+    angle = lonlat_to_angle(u.longitude.values, u.latitude.values)
+    u_east, v_north = rotate_u_v(-angle, u, v)
+
+    fields = {}
+    for name, da in (
+        ("u", u_east),
+        ("v", v_north),
+        ("Qair", _carra_instantaneous(dss_an, "2sh")),
+        ("Tair", _carra_instantaneous(dss_an, "2t")),
+        ("Pair", _carra_instantaneous(dss_an, "msl")),
+    ):
+        regridder, fields[name] = regrid_fn(regridder, da)
+    for name, short_name in (("swrad", "ssr"), ("lwrad_down", "strd"), ("rain", "tp")):
+        regridder, da = regrid_fn(regridder, _carra_var(ds_fc, short_name))
+        fields[name] = deaccumulate_forecast(da)
+
+    fields["u"].attrs = {"units": "m/s", "long_name": "Eastward component of 10 metre wind"}
+    fields["v"].attrs = {"units": "m/s", "long_name": "Northward component of 10 metre wind"}
+    fields["swrad"].attrs = {"units": "W/m^2", "long_name": "Net downward surface SW radiation"}
+    fields["Qair"].attrs = {"units": "kg/kg", "long_name": "Screen level specific humidity"}
+    fields["Tair"] = fields["Tair"] - 273.15
+    fields["Tair"].attrs = {"units": "degC", "long_name": "Screen level temperature (T2M)"}
+    fields["rain"].attrs = {"units": "kg/m^2/s", "long_name": "Precipitation flux"}
+    fields["Pair"].attrs = {"units": "Pa", "long_name": "Mean Sea Level Pressure (MSLP)"}
+    fields["lwrad_down"].attrs = {"units": "W/m^2", "long_name": "Surface LW downwelling radiation"}
+    return regridder, fields
+
+
+def get_ds_carra(regridder, dss_an, ds_fc, lat, lon):
+    """CARRA2 counterpart of get_ds: rectilinear lat/lon grid, one merged dataset."""
+    regridder, f = _carra_fields(regridder, dss_an, ds_fc, lambda r, da: regrid(r, da, lat, lon))
+    ds_out = xr.Dataset(
+        {
+            "u_wind_10m": f["u"],
+            "v_wind_10m": f["v"],
+            "swrad": f["swrad"],
+            "specific_humidity_2m": f["Qair"],
+            "air_temperature_2m": f["Tair"],
+            "precipitation": f["rain"],
+            "air_pressure_at_sea_level": f["Pair"],
+            "lwrad": f["lwrad_down"],
+        }
+    )
+    return regridder, ds_out
+
+
+def get_ds_roms_carra(regridder, dss_an, ds_fc, ds_grid):
+    """CARRA2 counterpart of get_ds_roms: {roms_name: da}, each on its own ROMS_TIME_DIMS time dimension."""
+    lat, lon = ds_grid.lat_rho, ds_grid.lon_rho
+    regridder, f = _carra_fields(regridder, dss_an, ds_fc, lambda r, da: regrid_curvilinear(r, da, lat, lon))
+    f["Uwind"], f["Vwind"] = rotate_u_v(ds_grid.angle.values, f.pop("u"), f.pop("v"))
+    f["Uwind"].attrs = {"units": "m/s", "long_name": "X-component of 10 metre wind"}
+    f["Vwind"].attrs = {"units": "m/s", "long_name": "Y-component of 10 metre wind"}
+    variables = {}
+    for name, roms_time in ROMS_TIME_DIMS.items():
+        da = f[name]
+        old_time = "time_acc" if name in ACCUMULATED_ROMS_NAMES else "time"
+        variables[name] = da.rename({old_time: roms_time}).rename(name)
+    return regridder, variables
 
 
 def generate_catalog_urls(start_year, end_year):

@@ -20,6 +20,9 @@ dependencies = [
     "sphinx_rtd_theme",
     "myst-parser",
     "siphon",
+    "cdsapi",
+    "cfgrib",
+    "eccodes",
 ]
 
 [project.optional-dependencies]
