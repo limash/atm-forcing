@@ -9,6 +9,7 @@ import argparse
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -33,7 +34,8 @@ TIME_DIMS = {"time", "time_acc", *ROMS_TIME_DIMS.values()}
 AREA_PAD_DEGREES = 0.5  # source data margin around the target grid for the interpolation
 
 
-def _retrieve_with_retry(client, request, target):
+def _retrieve_with_retry(request, target):
+    client = cdsapi.Client()  # one per thread
     for attempt in range(RETRIES):
         try:
             client.retrieve(CARRA_DATASET, request, str(target))
@@ -84,7 +86,6 @@ def process_carra2(
         float(np.max(lon)) + AREA_PAD_DEGREES,
     ]
 
-    client = cdsapi.Client()
     regridder = None
 
     # One request set per month: the CDS queue takes minutes per request, so daily requests would be far too slow.
@@ -107,9 +108,16 @@ def process_carra2(
         analysis, analysis_next, forecast = carra_requests(days, area)
         with tempfile.TemporaryDirectory(dir=output_dir, prefix=f"carra2_{label}_") as tmp:
             tmp = Path(tmp)
-            for name, request in {"analysis": analysis, "analysis_next": analysis_next, "forecast": forecast}.items():
-                print(f"Downloading {name} for {label}")
-                _retrieve_with_retry(client, request, tmp / f"{name}.grib")
+            # The three requests queue at CDS independently, so submit them together: waiting for one after
+            # the other adds up their queue times.
+            requests = {"analysis": analysis, "analysis_next": analysis_next, "forecast": forecast}
+            print(f"Downloading {', '.join(requests)} for {label}")
+            with ThreadPoolExecutor(max_workers=len(requests)) as pool:
+                futures = [
+                    pool.submit(_retrieve_with_retry, req, tmp / f"{name}.grib") for name, req in requests.items()
+                ]
+                for future in futures:
+                    future.result()
             dss_an = [open_carra_grib(tmp / f"{name}.grib", area) for name in ("analysis", "analysis_next")]
             ds_fc = open_carra_grib(tmp / "forecast.grib", area)
 
