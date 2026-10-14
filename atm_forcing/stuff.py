@@ -347,7 +347,8 @@ def open_carra_grib(path, area):
     dss = [d.isel(window).drop_vars(["heightAboveGround", "surface", "meanSea"], errors="ignore") for d in dss]
     dss = [d.assign_coords(longitude=(d.longitude + 180) % 360 - 180) for d in dss]
     # cfgrib builds the full-grid array of everything it is asked for before cropping (about 25 GB for a month of
-    # forecasts), so load one time index at a time: each GRIB field is still decoded once.
+    # forecasts), so load one time index at a time: each GRIB field is still decoded once. The loaded crop is a view
+    # of that full-grid array, hence the copy (otherwise every chunk keeps its full-grid array alive).
     dss = [_load_per_time(d) for d in dss]
     return xr.merge(dss, compat="override", join="exact")
 
@@ -355,8 +356,8 @@ def open_carra_grib(path, area):
 def _load_per_time(ds):
     if "time" not in ds.dims:
         return ds.load()
-    chunks = [ds.isel(time=i).load() for i in range(ds.sizes["time"])]
-    return xr.concat(chunks, dim="time", coords="minimal", compat="override")
+    chunks = [ds.isel(time=i).load().copy(deep=True) for i in range(ds.sizes["time"])]
+    return xr.concat(chunks, dim="time", coords=["valid_time"], compat="override")
 
 
 def _carra_var(ds, short_name):
@@ -394,7 +395,7 @@ def deaccumulate_forecast(da_acc, time_dim="time_acc"):
         valid = init + full.step.values
         rate = rate.assign_coords(step=valid[:-1] + (valid[1:] - valid[:-1]) / 2).rename({"step": time_dim})
         pieces.append(rate.drop_vars("time"))
-    return xr.concat(pieces, dim=time_dim).sortby(time_dim)
+    return xr.concat(pieces, dim=time_dim).sortby(time_dim).transpose(time_dim, ...)  # time first, as ROMS expects
 
 
 def _carra_fields(regridder, ds_an, ds_fc, regrid_fn):
