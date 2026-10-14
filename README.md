@@ -43,6 +43,8 @@ daily files are skipped, so runs are resumable after interruptions or failures.
 ### Download + regrid to a lat–lon grid (main entry point)
 ```bash
 python app/nora3.py -o /where/to/save [--start-year 2009] [--end-year 2023]
+# or by month, e.g. two months only:
+python app/nora3.py -o /where/to/save --start 2020-01 --end 2020-02
 ```
 Bilinearly regrids onto a rectilinear lat–lon grid covering the Oslofjord region
 (`LAT_NEW`/`LON_NEW` in `app/nora3.py` — edit these to change the domain), writing

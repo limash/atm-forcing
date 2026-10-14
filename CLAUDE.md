@@ -18,7 +18,7 @@ and, unlike `uv sync`, doesn't remove the conda packages.
 
 ```bash
 # Download + regrid to a rectilinear lat/lon grid (the main entry point)
-python app/nora3.py -o /where/to/save [--start-year 2010 --end-year 2020]
+python app/nora3.py -o /where/to/save [--start-year 2010 --end-year 2020]  # or --start 2020-01 --end 2020-02 (YYYY-MM)
 
 # Same, but regrid onto a curvilinear ROMS grid (reads FILE_PATH_GRID, rotates winds)
 python app/nora3.py -o /where/to/save --use-roms

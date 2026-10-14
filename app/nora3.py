@@ -7,6 +7,7 @@ import argparse
 import subprocess
 import sys
 import time
+from datetime import date, datetime
 from pathlib import Path
 
 import numpy as np
@@ -76,6 +77,8 @@ def process_nora3(
     end_year: int = None,
     file_path_grid: Path = None,
     debug: bool = False,
+    start: date = None,
+    end: date = None,
 ):
     output_dir = output_dir / "daily"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -91,6 +94,10 @@ def process_nora3(
     timestamps = []
 
     for date_and_time, catalog_url in generate_catalog_urls(start_year, end_year):
+        # optional month range within the years; whole days, so the 4-cycles-per-day bookkeeping is unaffected
+        month = (date_and_time.year, date_and_time.month)
+        if (start and month < (start.year, start.month)) or (end and month > (end.year, end.month)):
+            continue
         timestamp = date_and_time.strftime("%Y%m%d")
 
         if use_roms:
@@ -183,6 +190,10 @@ def process_nora3(
             timestamps = []
 
 
+def _year_month(text):
+    return datetime.strptime(text, "%Y-%m").date()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Process and regrid NORA3 atmospheric data.")
     parser.add_argument(
@@ -210,6 +221,16 @@ def main():
         help="End year for data processing",
     )
     parser.add_argument(
+        "--start",
+        type=_year_month,
+        help="First month, YYYY-MM (inclusive); used instead of --start-year",
+    )
+    parser.add_argument(
+        "--end",
+        type=_year_month,
+        help="Last month, YYYY-MM (inclusive); used instead of --end-year",
+    )
+    parser.add_argument(
         "--file-path-grid",
         type=Path,
         default=Path("/cluster/projects/nn9490k/ROHO800/Grid/ROHO800_grid_v2.nc"),
@@ -225,10 +246,12 @@ def main():
     process_nora3(
         args.output,
         use_roms=args.use_roms,
-        start_year=args.start_year,
-        end_year=args.end_year,
+        start_year=args.start.year if args.start else args.start_year,
+        end_year=args.end.year if args.end else args.end_year,
         file_path_grid=args.file_path_grid,
         debug=args.debug,
+        start=args.start,
+        end=args.end,
     )
 
 
