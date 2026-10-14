@@ -346,7 +346,17 @@ def open_carra_grib(path, area):
     window = {"y": slice(ys.min(), ys.max() + 1), "x": slice(xs.min(), xs.max() + 1)}
     dss = [d.isel(window).drop_vars(["heightAboveGround", "surface", "meanSea"], errors="ignore") for d in dss]
     dss = [d.assign_coords(longitude=(d.longitude + 180) % 360 - 180) for d in dss]
-    return xr.merge(dss, compat="override", join="exact").load()
+    # cfgrib builds the full-grid array of everything it is asked for before cropping (about 25 GB for a month of
+    # forecasts), so load one time index at a time: each GRIB field is still decoded once.
+    dss = [_load_per_time(d) for d in dss]
+    return xr.merge(dss, compat="override", join="exact")
+
+
+def _load_per_time(ds):
+    if "time" not in ds.dims:
+        return ds.load()
+    chunks = [ds.isel(time=i).load() for i in range(ds.sizes["time"])]
+    return xr.concat(chunks, dim="time", coords="minimal", compat="override")
 
 
 def _carra_var(ds, short_name):
